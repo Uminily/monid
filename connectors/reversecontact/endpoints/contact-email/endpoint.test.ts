@@ -9,10 +9,12 @@ const ID = "reversecontact#v2/contact/email";
 const asRecord = (value: Json | undefined) =>
     value as Record<string, Json | undefined>;
 
-const run = async (fixture: string) =>
+const URL_BODY = { url: "https://www.linkedin.com/in/janedoe" };
+
+const run = async (fixture: string, body: Record<string, Json> = URL_BODY) =>
     runEndpoint({
         unit: await testSealedUnit(ID),
-        input: { body: { url: "https://www.linkedin.com/in/janedoe" } },
+        input: { body },
         mode: "replay",
         fixture: await chain(fixture),
     });
@@ -47,9 +49,38 @@ Deno.test(`${ID} not found: a refunded job is a 404 with its code and a readable
     assertEquals(output.code, "email-not-found");
     assertEquals(
         output.message,
-        "No professional email address was found for this person. Nothing was billed.",
+        "No email address of the requested kind was found for this person. Nothing was billed.",
     );
     assertEquals("quotas" in asRecord(output.raw), false);
+});
+
+Deno.test(`${ID} any, both kinds found: the receipt's 8 settles the run, the extra 3 upstream debited on the result included`, async () => {
+    const result = await run("synthetic-contact-email-any-both", {
+        ...URL_BODY,
+        emailType: "any",
+    });
+    assertEquals(result.httpStatus, 200);
+    assertEquals(result.usage, {
+        credits: { default: 8 },
+        evidence: { CREDIT: 8 },
+    });
+    const data = asRecord(asRecord(result.output).data);
+    assertEquals(
+        (data.result as Array<Record<string, Json>>).map((email) => email.type),
+        ["professional", "personal"],
+    );
+});
+
+Deno.test(`${ID} any, professional only: settles at 3, not at the 5 debited upfront`, async () => {
+    const result = await run("synthetic-contact-email-any-professional", {
+        ...URL_BODY,
+        emailType: "any",
+    });
+    assertEquals(result.httpStatus, 200);
+    assertEquals(result.usage, {
+        credits: { default: 3 },
+        evidence: { CREDIT: 3 },
+    });
 });
 
 Deno.test(`${ID} upstream failure: fetch-data-error is a retriable 502, zero usage`, async () => {
@@ -77,11 +108,11 @@ Deno.test(`${ID} refused at submit (402): settles at once, zero usage, no poll`,
     assertEquals(asRecord(result.output).code, "INSUFFICIENT_CREDITS");
 });
 
-Deno.test(`${ID} budget: 10 minutes, past the slowest production job (321 s)`, async () => {
+Deno.test(`${ID} budget: 10 minutes, past the slowest production job (321 s), read every 2 s as upstream's Retry-After asks`, async () => {
     const unit = await testSealedUnit(ID);
     assertEquals(unit.doc.timeouts, {
         requestMs: 35_000,
         runMs: 600_000,
-        pollMs: 5_000,
+        pollMs: 2_000,
     });
 });

@@ -45,9 +45,10 @@ success output, and `output.fromError` SHALL remove it from `raw`.
 ### Requirement: The finders run to a finished job
 `reversecontact#v2/contact/email` and `reversecontact#v2/contact/phone`
 SHALL each carry a lifecycle whose `start` submits the body and keeps
-`data.webhookId` as `externalRunId`, and whose `poll` reads
-`GET /v2/webhooks/{webhookId}` until `data.status` is `succeeded` or
-`errored`. A poll answering 408, 429 or any 5xx SHALL hold the run open. A
+`data.webhookId` as `externalRunId`, and whose `poll` long-polls
+`GET /v2/webhooks/{webhookId}?wait=20` until `data.status` is `succeeded`
+or `errored`. A poll answering 408, 429 or any 5xx SHALL hold the run open
+and read again after 5 s. A
 2xx acknowledgement without a `webhookId` SHALL be a non-retriable
 infrastructure failure. The two lifecycles SHALL be byte-identical.
 
@@ -56,6 +57,13 @@ infrastructure failure. The two lifecycles SHALL be byte-identical.
   `data.creditsConsumed: 3` with `quotas.creditsConsumed: 0`
 - **THEN** usage is `{credits: {default: 3}, evidence: {CREDIT: 3}}` and
   neither `quotas` nor `data.creditsConsumed` is present in the output
+
+#### Scenario: An `any` lookup bills the kinds it found
+- **WHEN** an email job with `emailType: any` debits 5 upfront, finds a
+  professional and a personal address, and its final poll reports
+  `data.creditsConsumed: 8`
+- **THEN** usage is `{credits: {default: 8}, evidence: {CREDIT: 8}}`; the
+  same lookup finding only a professional address reports 3 and settles 3
 
 #### Scenario: A refunded miss is a 404
 - **WHEN** a job ends `errored` with `email-not-found`
@@ -75,8 +83,11 @@ patterns. The vendor's one-of rules SHALL be unions of required arms: `url`
 or `id` on the fetches; `email`, `firstName` or `lastName` on the person
 enrichment; exactly one of `url` or `id` on the lookalike; `url`,
 `fullName` + `companyDomain`, or `firstName` + `lastName` + `companyDomain`
-on the finders. `perPage` SHALL default to the vendor's 25 at the binding.
-No mirror SHALL expose `issuer`, `webhookUrl` or `fullProfile`.
+on the finders. `emailType` SHALL be accepted on the email finder only.
+The People filters SHALL carry the contract-type filters as the vendor's
+closed list of eight values and SHALL NOT carry `email`. `perPage` SHALL
+default to the vendor's 25 at the binding. No mirror SHALL expose `issuer`,
+`webhookUrl` or `fullProfile`.
 
 #### Scenario: A withheld field is rejected at the gate
 - **WHEN** a finder body carries `webhookUrl`, or a search body `issuer`

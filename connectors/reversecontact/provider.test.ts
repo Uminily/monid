@@ -18,7 +18,9 @@ const COMPANY_URL = "https://www.linkedin.com/company/stripe";
 
 /**
  * Reverse Contact's draw per synchronous endpoint, on its happy chain, as
- * the gateway prices it (public v2, 2026-10-21): 1 per fetched profile, 2
+ * the gateway prices it (public v2, rate card
+ * `https://docs.reversecontact.com/pricing`, updated 2026-10-23, read
+ * 2026-10-27): 1 per fetched profile, 2
  * per enrichment, 1 per delivered search result, plus 1 base credit on the
  * prompt searches (3 credits for 2 rows, so a fold counting rows instead
  * of reading the receipt fails here), and 0 for the counts. Written as
@@ -147,6 +149,30 @@ Deno.test("reversecontact: an empty search page is a real zero, never a fallback
     }
 });
 
+Deno.test("reversecontact: the contract-type and school filters pass the schema gate, on the search and its free count", async () => {
+    const body = {
+        currentFunction: ["Design"],
+        currentContractType: ["freelance", "self-employed"],
+        excludeContractType: ["internship"],
+        schoolName: ["HEC Paris", "ESSEC"],
+    };
+    for (
+        const [id, fixture] of [
+            ["reversecontact#v2/search/people", "synthetic-people-page"],
+            ["reversecontact#v2/search/people/count", "synthetic-count"],
+        ]
+    ) {
+        const result = await runEndpoint({
+            unit: await testSealedUnit(id),
+            input: { body },
+            mode: "replay",
+            fixture: await chain(fixture),
+        });
+        assertEquals(result.httpStatus, 200, id);
+        assertEquals(result.isProviderError, false, id);
+    }
+});
+
 Deno.test("reversecontact: a miss is a 404, data, zero usage, and the account's quotas leave the raw error", async () => {
     for (
         const id of [
@@ -260,6 +286,19 @@ Deno.test("reversecontact: estimates are the pre-run ceilings, with the vendor's
         { default: 3 },
     );
     assertEquals(
+        await estimate("reversecontact#v2/contact/email", {
+            body: { url: PERSON_URL, emailType: "personal" },
+        }),
+        { default: 5 },
+    );
+    // the most an `any` lookup can cost, when it finds both kinds
+    assertEquals(
+        await estimate("reversecontact#v2/contact/email", {
+            body: { url: PERSON_URL, emailType: "any" },
+        }),
+        { default: 8 },
+    );
+    assertEquals(
         await estimate("reversecontact#v2/contact/phone", {
             body: { url: PERSON_URL },
         }),
@@ -286,6 +325,13 @@ Deno.test("reversecontact: inputs the gateway would refuse, or that this connect
         // closed taxonomies and vocabularies
         ["reversecontact#v2/search/people", { currentSeniority: ["Boss"] }],
         ["reversecontact#v2/search/people", { changedJobsWithinDays: 45 }],
+        ["reversecontact#v2/search/people", {
+            currentContractType: ["cdi"],
+        }],
+        // `email` is no longer a People filter upstream (422 UNKNOWN_FIELD)
+        ["reversecontact#v2/search/people", {
+            email: "jane.doe@example.com",
+        }],
         ["reversecontact#v2/search/people", { perPage: 101 }],
         // `page` is gone upstream; `cursor` replaced it
         ["reversecontact#v2/search/people", {
@@ -311,8 +357,16 @@ Deno.test("reversecontact: inputs the gateway would refuse, or that this connect
             url: PERSON_URL,
             webhookUrl: "https://example.com/hook",
         }],
-        // the finder's one-of rule
+        // the finder's one-of rule, and `emailType` on the email finder only
         ["reversecontact#v2/contact/email", { fullName: "Jane Doe" }],
+        ["reversecontact#v2/contact/email", {
+            url: PERSON_URL,
+            emailType: "work",
+        }],
+        ["reversecontact#v2/contact/phone", {
+            url: PERSON_URL,
+            emailType: "personal",
+        }],
         ["reversecontact#v2/contact/phone", {
             firstName: "Jane",
             companyDomain: "example.com",

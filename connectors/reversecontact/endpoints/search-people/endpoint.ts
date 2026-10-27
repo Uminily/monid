@@ -8,12 +8,15 @@ export default defineEndpoint({
     meta: {
         displayName: "Search People",
         summary: "Find people by title, function, seniority, employer, " +
-            "industry, location, skills and more; full profiles back.",
+            "contract type, school, location, skills and more; full " +
+            "profiles back.",
         description: "Search the Reverse Contact people database with " +
             "structured filters and get full professional profiles back, " +
             "up to 100 per page. Filter on current or past job title, " +
-            "function, sub-function and seniority; current or past " +
+            "function, sub-function, seniority and contract type " +
+            "(freelance, internship, part-time...); current or past " +
             "employer by name, id, page handle, industry or headcount; " +
+            "schools attended; " +
             "cumulative experience in a function or seniority; total " +
             "experience; job changes in the last 30 to 120 days; skills, " +
             "spoken languages, location, keywords anywhere on the " +
@@ -31,7 +34,8 @@ export default defineEndpoint({
         notes: [
             "At least one filter is required (422 `NO_FILTER_PROVIDED`).",
             "`followersCount` used alone needs both bounds, " +
-            "`excludeLanguages` needs another positive filter, and an " +
+            "`excludeLanguages`, `excludeCurrentContractType` and " +
+            "`excludeContractType` need another positive filter, and an " +
             "include list may not contradict its exclude twin (422 " +
             "`CONTRADICTORY_FILTERS`).",
             "Very broad queries (a common title or one industry alone) can " +

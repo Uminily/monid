@@ -23,7 +23,9 @@ import { defineProvider, presets } from "@shared/core";
  *
  * `quotas.creditsConsumed` is computed by the same function the gateway
  * bills with: 1 per delivered search result, 2 per enrichment, 1 per fetch,
- * the prompt searches' base credit, 0 on an empty page. So every billed doc
+ * the prompt searches' base credit, 0 on an empty page. The published rate
+ * card is `https://docs.reversecontact.com/pricing` (updated 2026-10-23,
+ * read 2026-10-27). So every billed doc
  * here is a leaf `PER_UNIT` in `CREDIT` units at amount 1, the provider's
  * `usage.evidence` reads the receipt as the count and `usage.consolidate`
  * claims the same figure. The receipt has to be the evidence and not only
@@ -52,7 +54,7 @@ export default defineProvider({
         displayName: "Reverse Contact",
         summary: "B2B people and company data: enrich from a work email, " +
             "a domain or a profile URL, search people and organizations, " +
-            "and find professional emails and phone numbers.",
+            "and find professional or personal emails and phone numbers.",
         description: "Reverse Contact turns sparse B2B identifiers into " +
             "complete professional profiles. Resolve a work email, or a " +
             "name and a company, into the person behind it: current " +
@@ -61,13 +63,15 @@ export default defineProvider({
             "URL. Enrich a company from its domain with firmographics: " +
             "headcount, industry, specialities, headquarters, founding " +
             "year, website. Search people by title, function, seniority, " +
-            "current or past employer, industry, headcount, location, " +
-            "skills, languages, tenure and recent job changes, or search " +
+            "contract type, current or past employer, industry, " +
+            "headcount, schools, location, skills, languages, tenure and " +
+            "recent job changes, or search " +
             "organizations by industry, size, founding year and " +
             "headquarters, with structured filters or one plain-language " +
             "prompt, and count either for free before paying for pages. " +
             "Find people similar to a seed profile. Find a person's " +
-            "professional email address or phone number. Reach for it for " +
+            "professional or personal email address, or phone number. " +
+            "Reach for it for " +
             "lead enrichment, prospect list building, account research, " +
             "CRM hygiene and recruiting. Lookups that find nothing cost " +
             "nothing.",
@@ -169,7 +173,7 @@ export default defineProvider({
                 : undefined;
             const jobMessage = Object.entries({
                 "email-not-found":
-                    "No professional email address was found for this person. Nothing was billed.",
+                    "No email address of the requested kind was found for this person. Nothing was billed.",
                 "phone-not-found":
                     "No phone number was found for this person. Nothing was billed.",
                 "person-not-found":

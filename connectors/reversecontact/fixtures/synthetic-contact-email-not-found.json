@@ -1,6 +1,6 @@
 {
     "name": "synthetic-contact-email-not-found",
-    "description": "The email finder misses: the job ends `errored` with `email-not-found` and is refunded, so its receipt is 0. Synthetic, shaped on the public v2 contract (gateway envelope and OpenAPI document of 2026-10-21); values are placeholders.",
+    "description": "The email finder misses: the job ends `errored` with `email-not-found` and is refunded, so its receipt is 0. Synthetic, shaped on the public v2 contract (gateway envelope and OpenAPI document of 2026-10-27); values are placeholders.",
     "calls": [
         {
             "req": {
@@ -52,7 +52,7 @@
         {
             "req": {
                 "method": "GET",
-                "url": "{{request.origin}}/v2/webhooks/6f1c2a9e-3b7d-4c55-9a8e-1d2f3a4b5c6d"
+                "url": "{{request.origin}}/v2/webhooks/6f1c2a9e-3b7d-4c55-9a8e-1d2f3a4b5c6d?wait=20"
             },
             "res": {
                 "status": 200,

@@ -1,6 +1,6 @@
 {
     "name": "synthetic-contact-email-found",
-    "description": "The email finder: an acknowledgement debiting 3, a poll still running, then the finished job, whose own receipt (`data.creditsConsumed`) is 3. The poll's `quotas.creditsConsumed` is 0. Synthetic, shaped on the public v2 contract (gateway envelope and OpenAPI document of 2026-10-21); values are placeholders.",
+    "description": "The email finder: an acknowledgement debiting 3, a poll still running, then the finished job, whose own receipt (`data.creditsConsumed`) is 3. The poll's `quotas.creditsConsumed` is 0. Synthetic, shaped on the public v2 contract (gateway envelope and OpenAPI document of 2026-10-27); values are placeholders.",
     "calls": [
         {
             "req": {
@@ -52,7 +52,7 @@
         {
             "req": {
                 "method": "GET",
-                "url": "{{request.origin}}/v2/webhooks/6f1c2a9e-3b7d-4c55-9a8e-1d2f3a4b5c6d"
+                "url": "{{request.origin}}/v2/webhooks/6f1c2a9e-3b7d-4c55-9a8e-1d2f3a4b5c6d?wait=20"
             },
             "res": {
                 "status": 200,
@@ -104,7 +104,7 @@
         {
             "req": {
                 "method": "GET",
-                "url": "{{request.origin}}/v2/webhooks/6f1c2a9e-3b7d-4c55-9a8e-1d2f3a4b5c6d"
+                "url": "{{request.origin}}/v2/webhooks/6f1c2a9e-3b7d-4c55-9a8e-1d2f3a4b5c6d?wait=20"
             },
             "res": {
                 "status": 200,

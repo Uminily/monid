@@ -5,7 +5,8 @@ import { zContactPhoneBody } from "./schema/inputs.ts";
  * POST /v2/contact/phone: a person's phone numbers.
  *
  * The same asynchronous job as `contact/email` (see there): the submit
- * debits 20 credits, the lifecycle polls `GET /v2/webhooks/{webhookId}`,
+ * debits 20 credits, the lifecycle long-polls
+ * `GET /v2/webhooks/{webhookId}`,
  * and the poll's `data.creditsConsumed`, net of the refund a miss gets,
  * settles the run. The lifecycle, evidence and consolidate fns are
  * byte-identical to the email finder's, so they intern to one fnTable
@@ -46,7 +47,7 @@ export default defineEndpoint({
     },
     request: { method: "POST", path: "/v2/contact/phone" },
     input: { schema: { body: zContactPhoneBody } },
-    timeouts: { requestMs: 35_000, runMs: 600_000, pollMs: 5_000 },
+    timeouts: { requestMs: 35_000, runMs: 600_000, pollMs: 2_000 },
     lifecycle: {
         start: async ({ utils }) => {
             const res = await utils.request();
@@ -77,13 +78,16 @@ export default defineEndpoint({
                     { retriable: false },
                 );
             }
+            // Long poll: upstream holds the read up to 20 s while the job
+            // runs and answers as soon as it ends.
             const res = await utils.http({
                 method: "GET",
                 path: "/v2/webhooks/" + encodeURIComponent(webhookId),
+                queryParams: { wait: "20" },
             });
-            // A lookup that failed, not a job that ended: read again.
+            // A lookup that failed, not a job that ended: read again, later.
             if (res.status === 408 || res.status === 429 || res.status >= 500) {
-                return { kind: "RUNNING" };
+                return { kind: "RUNNING", pollAfterMs: 5_000 };
             }
             if (res.status < 200 || res.status >= 300) {
                 return {

@@ -3,19 +3,20 @@ import { zLocation, zRange, zValues } from "./common.ts";
 
 /**
  * The People filters, shared by `search/people` and `search/people/count`
- * (the gateway's `PeopleFilterFields`, public v2, 2026-10-21). Filters are
+ * (the gateway's `PeopleFilterFields`, public v2, 2026-10-27). Filters are
  * AND-combined and only narrow the result set.
  *
  * Multi-value fields are LISTS here. The gateway also takes a bare string,
  * but one shape per field is what a caller should see. The function and
- * seniority taxonomies are closed upstream (an off-taxonomy value answers
- * 422 `INVALID_FILTER_VALUE`), so they are enums; sub-functions and
- * industries are long sealed lists, validated upstream, described here.
+ * seniority taxonomies and the eight contract types are closed upstream
+ * (an off-list value answers 422 `INVALID_FILTER_VALUE`), so they are
+ * enums; sub-functions and industries are long sealed lists, validated
+ * upstream, described here.
  *
  * Cross-field rules the gateway enforces (documented in the endpoint
- * notes): at least one filter, `excludeLanguages` needs a positive filter,
- * `followersCount` alone needs both bounds, and an include list may not
- * contradict its exclude twin.
+ * notes): at least one filter, `excludeLanguages` and the two contract-type
+ * exclusions need a positive filter, `followersCount` alone needs both
+ * bounds, and an include list may not contradict its exclude twin.
  */
 
 const zFunction = z.enum([
@@ -66,6 +67,17 @@ const zSeniority = z.enum([
     "Other",
 ]);
 
+const zContractType = z.enum([
+    "full-time",
+    "part-time",
+    "permanent",
+    "contract",
+    "internship",
+    "self-employed",
+    "freelance",
+    "apprenticeship",
+]);
+
 const INDUSTRY_HINT = "Exact values of the industry taxonomy " +
     "(https://docs.reversecontact.com/guides/industries), e.g. 'Software " +
     "Development', 'IT Services and IT Consulting', 'Financial Services'. " +
@@ -85,9 +97,6 @@ export const peopleFilterFields = {
         "Words searched across the whole profile (headline, summary, " +
             "titles, companies, skills, education, location). Every word " +
             "must appear, in any field; whole words only.",
-    ).optional(),
-    email: z.email().describe(
-        "A known email address of the person.",
     ).optional(),
     isOpenToWork: z.boolean().describe(
         "Only people signalling they are open to work.",
@@ -130,6 +139,24 @@ export const peopleFilterFields = {
     ).optional(),
     excludeCurrentSeniority: z.array(zSeniority).min(1).max(20).describe(
         "Seniority levels of the current position to exclude.",
+    ).optional(),
+    currentContractType: z.array(zContractType).min(1).max(20).describe(
+        "Contract types of the current position, OR-matched. A position " +
+            "that declares no contract type never matches.",
+    ).optional(),
+    excludeCurrentContractType: z.array(zContractType).min(1).max(20)
+        .describe(
+            "Contract types of the current position to exclude; people " +
+                "whose current position declares no contract type are " +
+                "left out too. Needs another, positive filter.",
+        ).optional(),
+    contractType: z.array(zContractType).min(1).max(20).describe(
+        "Contract types of any position, current or past, OR-matched.",
+    ).optional(),
+    excludeContractType: z.array(zContractType).min(1).max(20).describe(
+        "Contract types to exclude, any position, current or past; " +
+            "people with no contract type on record are kept. Needs " +
+            "another, positive filter.",
     ).optional(),
     changedJobsWithinDays: z.literal([30, 60, 90, 120]).describe(
         "Current position started within the last N days: 30, 60, 90 or " +
@@ -219,6 +246,11 @@ export const peopleFilterFields = {
         `Industries to exclude, any employer. ${INDUSTRY_HINT}`,
     ).optional(),
 
+    schoolName: zValues(
+        "Schools attended, e.g. 'HEC Paris'. Every word of a value " +
+            "must appear in the name of one same school, whole " +
+            "words, case and accents ignored.",
+    ).optional(),
     skills: zValues(
         "Skill names. Whole-value match: 'Java' does not match 'JavaScript'.",
     ).optional(),
