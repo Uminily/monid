@@ -7,9 +7,10 @@ import { defineProvider, presets } from "@shared/core";
  * `https://api.reversecontact.com/openapi.json`; docs:
  * `https://docs.reversecontact.com`.
  *
- * Thirteen endpoints. Eleven are one synchronous exchange (fetch, enrich,
- * search, count). The two contact finders are asynchronous upstream: the
- * submit answers a job acknowledgement and the result is read from
+ * Fifteen endpoints. Thirteen are one synchronous exchange (fetch,
+ * availability check, enrich, search, count). The two contact finders are
+ * asynchronous upstream: the submit answers a job acknowledgement and the
+ * result is read from
  * `GET /v2/webhooks/{webhookId}`, which each of them polls in its own
  * lifecycle (none on the provider, which would replace the declarative path
  * of the synchronous eleven).
@@ -23,8 +24,9 @@ import { defineProvider, presets } from "@shared/core";
  *
  * `quotas.creditsConsumed` is computed by the same function the gateway
  * bills with: 1 per delivered search result, 2 per enrichment, 1 per fetch,
- * the prompt searches' base credit, 0 on an empty page. The published rate
- * card is `https://docs.reversecontact.com/pricing` (updated 2026-10-23,
+ * the prompt searches' base credit, 0 on an empty page, 0 for the counts
+ * and the availability checks. The published rate card is
+ * `https://docs.reversecontact.com/pricing` (updated 2026-10-23,
  * read 2026-10-27). So every billed doc
  * here is a leaf `PER_UNIT` in `CREDIT` units at amount 1, the provider's
  * `usage.evidence` reads the receipt as the count and `usage.consolidate`
@@ -39,7 +41,9 @@ import { defineProvider, presets } from "@shared/core";
  * MISSES ARE FREE, and arrive as non-2xx, which the engine zero-bills: a
  * profile the cached database does not hold, an enrichment without a match
  * and an unknown lookalike seed are 404 at 0 credits; every validation
- * refusal (422) and every 4xx other than 404 is 0 credits upstream.
+ * refusal (422) and every 4xx other than 404 is 0 credits upstream. The
+ * free availability checks answer a profile they do not hold with 200
+ * `data.exists: false`.
  *
  * SURFACES NOT IN THIS CONNECTOR, and why:
  *   - The `/live` fetches: they bill a miss (2 credits on a 404), which
@@ -69,6 +73,8 @@ export default defineProvider({
             "organizations by industry, size, founding year and " +
             "headquarters, with structured filters or one plain-language " +
             "prompt, and count either for free before paying for pages. " +
+            "Check for free whether a person or company profile is held, " +
+            "and how fresh it is, before fetching it. " +
             "Find people similar to a seed profile. Find a person's " +
             "professional or personal email address, or phone number. " +
             "Reach for it for " +
@@ -110,17 +116,18 @@ export default defineProvider({
         },
         /** THE RECEIPT IS THE EVIDENCE: the count of a billed doc is the
          *  envelope's `quotas.creditsConsumed`, so a zero receipt settles
-         *  zero. Free docs count nothing. */
+         *  zero. Every v2 success carries it: a 2xx without it fails closed
+         *  (FN_CONTRACT) instead of settling delivered data at zero. Free
+         *  docs count nothing. */
         evidence: ({ data, utils }) => {
             if (data.usage.model.kind !== "PER_UNIT") return { counts: {} };
-            const consumed = utils.json.optionalNum(
-                data.output,
-                "$.quotas.creditsConsumed",
-            );
             return {
-                counts: consumed === undefined
-                    ? {}
-                    : { [data.usage.model.unit]: consumed },
+                counts: {
+                    [data.usage.model.unit]: utils.json.num(
+                        data.output,
+                        "$.quotas.creditsConsumed",
+                    ),
+                },
             };
         },
         /** The vendor's own claim, lifted out with the whole `quotas`

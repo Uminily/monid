@@ -18,10 +18,11 @@ nothing is inferred from the payload.
 
 ## What Changes
 
-- **connectors/reversecontact**: 13 endpoints against
+- **connectors/reversecontact**: 15 endpoints against
   `https://api.reversecontact.com`, bearer auth (`rc_...` keys), one credit
   pool, a provider-level `output.fromError`, and no provider lifecycle.
-  - 11 synchronous: fetch a person or a company by profile URL or id, enrich
+  - 13 synchronous: fetch a person or a company by profile URL or id, check
+    for free whether either is held and how fresh it is, enrich
     a person (email, or name and company) and a company (domain), People and
     Organization Search, their free counts, their prompt variants, and
     People lookalikes.
@@ -44,7 +45,9 @@ nothing is inferred from the payload.
   the emails found, not `emailType` (3 credits for a professional email, 5
   for a personal one, so an `any` lookup costs 3, 5 or 8, the 8 only when
   it finds both), and upstream settles the upfront debit when the result
-  arrives. The submit's receipt never shows that settlement.
+  arrives. The submit's receipt never shows that settlement. Every
+  evidence fn reads its receipt with `utils.json.num`: a 2xx without it
+  fails `FN_CONTRACT` instead of settling delivered data at zero.
 - **The account's quotas never reach the caller.** Beside the receipt,
   `quotas` carries the broker account's balance, limits and ids. It is
   plucked on success and removed from `raw` on error.
@@ -53,7 +56,9 @@ nothing is inferred from the payload.
   are 404 at 0 credits upstream; validation refusals (422) and every 4xx
   other than 404 are 0 credits upstream. A finder job that ends `errored` is
   refunded upstream and settles as a provider error: `*-not-found` 404,
-  `invalid-request` 400, `fetch-data-error` and unknown codes 502.
+  `invalid-request` 400, `fetch-data-error` and unknown codes 502. The
+  free availability checks are the exception: a profile they do not hold
+  is a 200 with `data.exists: false`.
 - **Budgets are measured.** Over 38,398 production email jobs (30 days to
   2026-10-21) completion took 16 s at the median, 160 s at p99 and 321 s at
   most; phone jobs never exceeded 30 s. Both finders carry a 10-minute
@@ -64,13 +69,17 @@ nothing is inferred from the payload.
   binding), `perPage + 1` per prompt search, 3, 5 or 8 per email lookup
   by `emailType` (`professional`, `personal`, `any`: the most it can
   cost), 20 per phone lookup.
-- 23 synthetic fixture chains and 19 replay tests, plus one live test gated
+- 28 synthetic fixture chains and 22 replay tests, plus one live test gated
   on `REVERSECONTACT_API_KEY` that runs a free count.
 - **Revised 2026-10-27** to the vendor's current contract: `emailType` on
   the email finder (vendor changelog v2.36.0), the long poll (v2.38.0),
   the contract-type and school filters on People Search and its count
   (v2.39.0), and the People `email` filter removed, which the vendor now
   refuses with 422 `UNKNOWN_FIELD`.
+- **Revised 2026-10-28** after the maintainer's review: the two free
+  availability checks (`/v2/fetch/persons/check`,
+  `/v2/fetch/companies/check`) added, and every receipt read with
+  `utils.json.num`, so a 2xx without one fails closed.
 
 ## Capabilities
 
@@ -98,7 +107,7 @@ nothing is inferred from the payload.
 
 ## Impact
 
-New connector tree and 13 lines in `connectors/ids.lock.json`. No new
+New connector tree and 15 lines in `connectors/ids.lock.json`. No new
 `Unit`, preset, hook, category or compiler change, and no engine bump.
 Fixtures carry the `synthetic-` prefix until they are recorded against the
 provider key.

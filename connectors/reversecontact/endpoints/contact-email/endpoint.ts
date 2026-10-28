@@ -162,16 +162,14 @@ export default defineEndpoint({
                     : 3,
             },
         }),
-        /** The job's own receipt, net of refunds. */
-        evidence: ({ data, utils }) => {
-            const consumed = utils.json.optionalNum(
-                data.output,
-                "$.data.creditsConsumed",
-            );
-            return {
-                counts: consumed === undefined ? {} : { CREDIT: consumed },
-            };
-        },
+        /** The job's own receipt, net of refunds. A finished job always
+         *  carries it: a 2xx without it fails closed (FN_CONTRACT) instead
+         *  of settling a delivered result at zero. */
+        evidence: ({ data, utils }) => ({
+            counts: {
+                CREDIT: utils.json.num(data.output, "$.data.creditsConsumed"),
+            },
+        }),
         /** The same receipt as the claim, lifted out with the poll's own
          *  `quotas` block (the account's balance, and a 0 for the poll). */
         consolidate: ({ data, utils }) => {

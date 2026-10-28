@@ -23,7 +23,8 @@ const COMPANY_URL = "https://www.linkedin.com/company/stripe";
  * 2026-10-27): 1 per fetched profile, 2
  * per enrichment, 1 per delivered search result, plus 1 base credit on the
  * prompt searches (3 credits for 2 rows, so a fold counting rows instead
- * of reading the receipt fails here), and 0 for the counts. Written as
+ * of reading the receipt fails here), and 0 for the counts and the
+ * availability checks. Written as
  * LITERALS on purpose: deriving them from each doc's model would make this
  * table a tautology. A new endpoint must state its row here; the contact
  * finders have their own files.
@@ -41,6 +42,16 @@ const RATE: Record<
         fixture: "synthetic-fetch-company",
         input: { body: { url: COMPANY_URL } },
         usage: { credits: { default: 1 }, evidence: { CREDIT: 1 } },
+    },
+    "reversecontact#v2/fetch/persons/check": {
+        fixture: "synthetic-check-person",
+        input: { body: { url: PERSON_URL } },
+        usage: { credits: {}, evidence: {} },
+    },
+    "reversecontact#v2/fetch/companies/check": {
+        fixture: "synthetic-check-company",
+        input: { body: { url: COMPANY_URL } },
+        usage: { credits: {}, evidence: {} },
     },
     "reversecontact#v2/enrich/persons": {
         fixture: "synthetic-enrich-person",
@@ -106,9 +117,15 @@ const providerIds = async (): Promise<string[]> => {
 const asRecord = (value: Json | undefined) =>
     value as Record<string, Json | undefined>;
 
+/** The synchronous docs that bill, all on the provider's receipt pair: the
+ *  counts and the availability checks are free. */
+const BILLED_SYNC = Object.keys(RATE).filter((id) =>
+    !id.endsWith("/count") && !id.endsWith("/check")
+);
+
 Deno.test("reversecontact: the rate table and the contact finders cover exactly the compiled endpoints", async () => {
     const ids = await providerIds();
-    assertEquals(ids.length, 13);
+    assertEquals(ids.length, 15);
     assertEquals(ids, [...Object.keys(RATE), ...CONTACT_IDS].sort());
 });
 
@@ -127,6 +144,49 @@ Deno.test("reversecontact: every synchronous happy run settles on its receipt, a
         assertEquals("quotas" in output, false, id);
         assertEquals(output.success, true, id);
         assertEquals(typeof asRecord(output.metadata).requestId, "string", id);
+    }
+});
+
+Deno.test("reversecontact: a 2xx without its receipt fails closed (FN_CONTRACT), never a zero bill", async () => {
+    for (const id of BILLED_SYNC) {
+        await assertRejects(
+            async () =>
+                runEndpoint({
+                    unit: await testSealedUnit(id),
+                    input: RATE[id].input,
+                    mode: "replay",
+                    fixture: await chain("synthetic-receipt-missing"),
+                }),
+            Error,
+            "FN_CONTRACT",
+            id,
+        );
+    }
+});
+
+Deno.test("reversecontact: a profile the database does not hold is a free 200 with exists false on the checks", async () => {
+    for (
+        const id of [
+            "reversecontact#v2/fetch/persons/check",
+            "reversecontact#v2/fetch/companies/check",
+        ]
+    ) {
+        const result = await runEndpoint({
+            unit: await testSealedUnit(id),
+            input: RATE[id].input,
+            mode: "replay",
+            fixture: await chain("synthetic-check-absent"),
+        });
+        assertEquals(result.httpStatus, 200, id);
+        assertEquals(result.isProviderError, false, id);
+        assertEquals(result.usage, { credits: {}, evidence: {} }, id);
+        const output = asRecord(result.output);
+        assertEquals("quotas" in output, false, id);
+        assertEquals(
+            output.data,
+            { exists: false, lastUpdate: null },
+            id,
+        );
     }
 });
 
@@ -280,6 +340,13 @@ Deno.test("reversecontact: estimates are the pre-run ceilings, with the vendor's
         {},
     );
     assertEquals(
+        await estimate(
+            "reversecontact#v2/fetch/persons/check",
+            RATE["reversecontact#v2/fetch/persons/check"].input,
+        ),
+        {},
+    );
+    assertEquals(
         await estimate("reversecontact#v2/contact/email", {
             body: { url: PERSON_URL },
         }),
@@ -315,6 +382,9 @@ Deno.test("reversecontact: inputs the gateway would refuse, or that this connect
         ["reversecontact#v2/fetch/persons", { url: COMPANY_URL }],
         ["reversecontact#v2/fetch/companies", { url: PERSON_URL }],
         ["reversecontact#v2/fetch/persons", {}],
+        ["reversecontact#v2/fetch/persons/check", {}],
+        ["reversecontact#v2/fetch/persons/check", { url: COMPANY_URL }],
+        ["reversecontact#v2/fetch/companies/check", { url: PERSON_URL }],
         // a person identifier is required; company fields alone are not one
         ["reversecontact#v2/enrich/persons", { companyDomain: "example.com" }],
         // exactly one lookalike seed
@@ -408,8 +478,7 @@ Deno.test("reversecontact: fn provenance, one inject, one fromError, one receipt
         assertEquals(doc.input.toRequest, undefined, id);
         assertEquals(doc.output.fromResponse, undefined, id);
     }
-    const billedSync = Object.keys(RATE).filter((id) => !id.endsWith("/count"));
-    for (const id of billedSync) {
+    for (const id of BILLED_SYNC) {
         const usage = bundle.endpoints[id].usage;
         assertEquals(usage.evidence.$fn.key, ref.usage.evidence.$fn.key, id);
         assertEquals(

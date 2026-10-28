@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import { fromFileUrl } from "@std/path";
 import type { Json } from "@shared/core";
 import { loadFixture, runEndpoint, testSealedUnit } from "@shared/testing";
@@ -98,6 +98,15 @@ Deno.test(`${ID} a 503 on the poll holds the run open; the next read settles it`
         credits: { default: 3 },
         evidence: { CREDIT: 3 },
     });
+});
+
+Deno.test(`${ID} a finished job without its receipt fails closed (FN_CONTRACT), never a zero bill`, async () => {
+    // the phone finder's evidence is the same interned fn (provider.test.ts)
+    await assertRejects(
+        () => run("synthetic-contact-receipt-missing"),
+        Error,
+        "FN_CONTRACT",
+    );
 });
 
 Deno.test(`${ID} refused at submit (402): settles at once, zero usage, no poll`, async () => {

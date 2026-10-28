@@ -8,7 +8,7 @@ The reversecontact provider SHALL declare name `reversecontact`,
 `presets.auth.bearer()`, and the single credit pool `default` ("Reverse
 Contact credits"). It SHALL declare a provider-level `output.fromError` and
 SHALL NOT declare a lifecycle, because a provider-level `start` would
-replace the declarative execution of the eleven synchronous endpoints.
+replace the declarative execution of the thirteen synchronous endpoints.
 
 #### Scenario: Vendor non-2xx is zero-billed data
 - **WHEN** any endpoint receives a 402
@@ -22,8 +22,10 @@ replace the declarative execution of the eleven synchronous endpoints.
 Every billed synchronous endpoint SHALL price a leaf `PER_UNIT` in `CREDIT`
 units at amount 1, and the provider SHALL declare `usage.evidence` reading
 `quotas.creditsConsumed` as that count and `usage.consolidate` claiming the
-same figure when it is positive. Free endpoints (the two counts) SHALL
-declare a `FREE` model.
+same figure when it is positive. The evidence SHALL read the receipt with
+`utils.json.num`, so a success without one fails `FN_CONTRACT`. Free
+endpoints (the two counts and the two availability checks) SHALL declare a
+`FREE` model.
 
 #### Scenario: A prompt search bills its base credit
 - **WHEN** a People Search by prompt returns two profiles with a receipt
@@ -33,6 +35,21 @@ declare a `FREE` model.
 #### Scenario: An empty page settles zero
 - **WHEN** a search returns `data.data: []` with a receipt of 0
 - **THEN** usage carries no credits and `evidence` is `{CREDIT: 0}`
+
+#### Scenario: A 2xx without its receipt fails closed
+- **WHEN** a billed synchronous endpoint answers 2xx with data and no
+  `quotas.creditsConsumed`
+- **THEN** the run fails `FN_CONTRACT` and settles nothing at zero
+
+### Requirement: The availability checks are free
+`reversecontact#v2/fetch/persons/check` and
+`reversecontact#v2/fetch/companies/check` SHALL declare a `FREE` model and
+take the fetches' body.
+
+#### Scenario: A profile the database does not hold
+- **WHEN** a check answers 200 `{exists: false, lastUpdate: null}`
+- **THEN** the run succeeds with usage `{credits: {}, evidence: {}}` and
+  no `quotas` in the output
 
 ### Requirement: The account's quotas never reach the caller
 `usage.consolidate` SHALL pluck the whole `quotas` block out of every
@@ -65,6 +82,11 @@ infrastructure failure. The two lifecycles SHALL be byte-identical.
 - **THEN** usage is `{credits: {default: 8}, evidence: {CREDIT: 8}}`; the
   same lookup finding only a professional address reports 3 and settles 3
 
+#### Scenario: A finished job without its receipt fails closed
+- **WHEN** an email job succeeds and its final poll carries no
+  `data.creditsConsumed`
+- **THEN** the run fails `FN_CONTRACT` and settles nothing at zero
+
 #### Scenario: A refunded miss is a 404
 - **WHEN** a job ends `errored` with `email-not-found`
 - **THEN** the run settles 404, zero usage, with `code` `email-not-found`
@@ -80,7 +102,7 @@ infrastructure failure. The two lifecycles SHALL be byte-identical.
 Every mirror SHALL be strict, as the gateway rejects unknown search keys.
 URLs SHALL carry the gateway's own patterns and ids their `prs_` / `com_`
 patterns. The vendor's one-of rules SHALL be unions of required arms: `url`
-or `id` on the fetches; `email`, `firstName` or `lastName` on the person
+or `id` on the fetches and the availability checks; `email`, `firstName` or `lastName` on the person
 enrichment; exactly one of `url` or `id` on the lookalike; `url`,
 `fullName` + `companyDomain`, or `firstName` + `lastName` + `companyDomain`
 on the finders. `emailType` SHALL be accepted on the email finder only.

@@ -8,7 +8,7 @@
       success and error envelopes, the finders' acknowledgement and poll
 - [x] 1.2 Pin the rates: 1 per fetch (0 on a miss), 2 per enrichment (0 on
       a miss), 1 per delivered search result, 1 base credit per prompt
-      search, 0 for the counts, 3 per professional and 5 per personal email
+      search, 0 for the counts and the availability checks, 3 per professional and 5 per personal email
       kind found, 20 per phone found (debited at submit, settled when the
       result arrives, refunded on a miss)
 - [x] 1.3 Establish that every success envelope carries
@@ -25,9 +25,10 @@
 - [x] 2.2 Shared fragments in `schema/`: URL and id patterns, pagination,
       People and Organization filters, the finders' body
 
-## 3. Endpoints (13)
+## 3. Endpoints (15)
 
-- [x] 3.1 Fetch person and company, enrich person and company
+- [x] 3.1 Fetch person and company, their availability checks, enrich
+      person and company
 - [x] 3.2 People Search, count, prompt, lookalike
 - [x] 3.3 Organization Search, count, prompt
 - [x] 3.4 Email and phone finders, each with the shared lifecycle and the
@@ -35,13 +36,15 @@
 
 ## 4. Fixtures + tests
 
-- [x] 4.1 23 provider-level chains, `synthetic-` prefixed until recorded
-- [x] 4.2 19 replay tests: a literal rate table over the eleven
-      synchronous endpoints, the empty-page zero, misses and error
+- [x] 4.1 28 provider-level chains, `synthetic-` prefixed until recorded
+- [x] 4.2 22 replay tests: a literal rate table over the thirteen
+      synchronous endpoints, the empty-page zero, a 2xx without its
+      receipt failing closed, the checks' free miss, misses and error
       envelopes, estimates, schema gates (patterns, one-of rules, closed
       taxonomies, withheld fields), fn provenance, and the finders' chains
       (found, `any` finding one or both kinds, miss, upstream failure,
-      transient poll, refusal at submit, phone finding off)
+      transient poll, a finished job without its receipt, refusal at
+      submit, phone finding off)
 - [ ] 4.3 Record real chains and run `deno task test:live` once the
       provider key is in the platform's secret store
 
@@ -51,7 +54,7 @@
 - [x] 5.2 `deno task test`: full suite green
 - [x] 5.3 `deno task version:check`: no contract-surface change
 - [x] 5.4 `deno task catalog endpoints --provider reversecontact` lists all
-      13
+      15
 
 ## 6. Vendor contract revision (2026-10-27)
 
@@ -64,3 +67,13 @@
       and `schoolName` added, `email` removed
 - [x] 6.4 Rate card cited in the provider header and the rate table:
       `https://docs.reversecontact.com/pricing`
+
+## 7. Maintainer review (2026-10-28)
+
+- [x] 7.1 `#v2/fetch/persons/check` and `#v2/fetch/companies/check`: free,
+      the fetches' body, a miss answering 200 `exists: false`
+- [x] 7.2 Every evidence fn reads its receipt with `utils.json.num`
+      (provider, email and phone finders): a 2xx without one fails
+      `FN_CONTRACT`
+- [x] 7.3 Regression tests for both, failing on the previous
+      `optionalNum` reads
