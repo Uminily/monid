@@ -69,14 +69,17 @@ nothing is inferred from the payload.
   The job bills upstream at submit and runs on whatever the poll answers,
   so a failed read (transport, 401, 403, 408, 429, 5xx) holds the run
   open, and a job that cannot be read (404, 410) fails the run as a 502,
-  not as a free miss. The submit carries no idempotency key upstream, so a
-  submit lost in transit ends the run as a 502 instead of being resent.
+  not as a free miss. The submit carries `Idempotency-Key: {runId}:submit`,
+  which upstream honors on both finders (the first acknowledgement replayed
+  for 24 hours, `Idempotent-Replayed: true`), so a submit lost in transit
+  stays a retriable `EXECUTION_FAILED` and the host's resend gets the first
+  job back instead of starting a second.
 - **Estimates are ceilings.** 1 per fetch, 2 per enrichment, `perPage` per
   search page (the vendor's documented default of 25 is stated at the
   binding), `perPage + 1` per prompt search, 3, 5 or 8 per email lookup
   by `emailType` (`professional`, `personal`, `any`: the most it can
   cost), 20 per phone lookup.
-- 31 synthetic fixture chains and 28 replay tests, plus one live test gated
+- 31 synthetic fixture chains and 29 tests, plus one live test gated
   on `REVERSECONTACT_API_KEY` that runs a free count.
 - **Revised 2026-10-27** to the vendor's current contract: `emailType` on
   the email finder (vendor changelog v2.36.0), the long poll (v2.38.0),

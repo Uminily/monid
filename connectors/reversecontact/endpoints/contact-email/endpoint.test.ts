@@ -1,6 +1,6 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { fromFileUrl } from "@std/path";
-import { directTransport, Engine } from "@monid/connector-engine";
+import { directTransport, Engine, EngineError } from "@monid/connector-engine";
 import type { Json } from "@shared/core";
 import {
     loadFixture,
@@ -50,6 +50,28 @@ const runOverFlakyNetwork = async (fixture: string, dropped: number[]) => {
     }).load(unit);
     return { result: await loaded.run({ body: URL_BODY }), sent };
 };
+
+const WEBHOOK_ID = "6f1c2a9e-3b7d-4c55-9a8e-1d2f3a4b5c6d";
+const json = (
+    status: number,
+    body: Json,
+    headers: Record<string, string> = {},
+) => new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json", ...headers },
+});
+
+/** The endpoint over a hand-written upstream, its start driven the way a
+ *  host drives it: under the run handle it is given, as often as it is
+ *  retried. */
+const loadOver = async (fetch: typeof globalThis.fetch) =>
+    await new Engine({
+        transport: directTransport({
+            params: () => Promise.resolve({ apiKey: "test-key" }),
+            fetch,
+        }),
+        sleep: () => Promise.resolve(),
+    }).load(await testSealedUnit(ID));
 
 Deno.test(`${ID} found: the run waits for the job and settles on the job's own receipt, not the poll's quotas`, async () => {
     const result = await run("synthetic-contact-email-found");
@@ -194,23 +216,62 @@ Deno.test(`${ID} a poll lost in transit holds the run open: the next read goes o
     });
 });
 
-Deno.test(`${ID} a submit lost in transit is never resent: the run ends a 502, zero usage, after one POST`, async () => {
-    const { result, sent } = await runOverFlakyNetwork(
-        "synthetic-contact-email-found",
-        [0],
+Deno.test(`${ID} a submit lost in transit fails the start as retriable; the host's resend carries the same Idempotency-Key and gets the first job back`, async () => {
+    // Upstream as the gateway answers it: the first submit starts the job
+    // and its response is lost; the resend under the same key replays the
+    // acknowledgement.
+    const sent: Headers[] = [];
+    const loaded = await loadOver((_input, init) => {
+        sent.push(new Headers(init?.headers));
+        return sent.length === 1
+            ? Promise.reject(new TypeError("connection reset"))
+            : Promise.resolve(json(200, {
+                success: true,
+                data: { status: "created", webhookId: WEBHOOK_ID },
+                error: null,
+            }, { "idempotent-replayed": "true" }));
+    });
+    const handle = { runId: "run-42" };
+    const lost = await assertRejects(
+        () => loaded.start({ body: URL_BODY }, handle),
+        EngineError,
     );
-    assertEquals(sent, ["POST"]);
-    assertEquals(result.httpStatus, 502);
-    assertEquals(result.isProviderError, true);
-    assertEquals(result.usage, { credits: {}, evidence: {} });
-    const output = asRecord(result.output);
-    assertEquals(output.code, "submit_unconfirmed");
+    assertEquals(lost.code, "EXECUTION_FAILED");
+    assertEquals(lost.retriable, true);
+    const resent = await loaded.start({ body: URL_BODY }, handle);
     assertEquals(
-        (output.message as string).startsWith(
-            "The lookup's submit got no response",
-        ),
-        true,
+        resent.kind === "RUNNING" && resent.state.externalRunId,
+        WEBHOOK_ID,
     );
+    // another run, another key; the bearer the provider compiles stays
+    await loaded.start({ body: URL_BODY }, { runId: "run-43" });
+    assertEquals(sent.map((headers) => headers.get("idempotency-key")), [
+        "run-42:submit",
+        "run-42:submit",
+        "run-43:submit",
+    ]);
+    assertEquals(sent[0].get("authorization"), "Bearer test-key");
+});
+
+Deno.test(`${ID} a resend while the first submit is still processed (409 IDEMPOTENCY_KEY_IN_USE) fails the start as retriable, never a settled run`, async () => {
+    const loaded = await loadOver(() =>
+        Promise.resolve(json(409, {
+            success: false,
+            data: null,
+            error: {
+                code: "IDEMPOTENCY_KEY_IN_USE",
+                message: "A request with this Idempotency-Key is still being " +
+                    "processed. Retry shortly to receive its response.",
+                details: { retryAfter: 1 },
+            },
+        }, { "retry-after": "1" }))
+    );
+    const inUse = await assertRejects(
+        () => loaded.start({ body: URL_BODY }, { runId: "run-42" }),
+        EngineError,
+    );
+    assertEquals(inUse.code, "EXECUTION_FAILED");
+    assertEquals(inUse.retriable, true);
 });
 
 Deno.test(`${ID} budget: 30 minutes, room past the slowest production job (321 s) for a poll outage, read every 2 s as upstream's Retry-After asks`, async () => {

@@ -28,11 +28,17 @@ import { zContactEmailBody } from "./schema/inputs.ts";
  * upstream refunds it: `*-not-found` is a 404, `invalid-request` a 400,
  * `fetch-data-error` (safe to retry) and anything unknown a 502.
  *
- * THE SUBMIT IS SENT ONCE. It debits upstream and carries no idempotency
- * key, so a response lost in transit (a retriable `EXECUTION_FAILED` a host
- * would replay) may hide a job that already started and billed, and a
- * second submit would start and bill another. The run ends instead, as a
- * 502 `submit_unconfirmed` that bills the caller nothing.
+ * THE SUBMIT CARRIES `Idempotency-Key: {runId}:submit`. It debits and
+ * starts a job, and the host-stable run id (design D34) makes every resend
+ * of this run's submit the same request: upstream answers it with the first
+ * submit's acknowledgement (same `webhookId`, `Idempotent-Replayed: true`),
+ * no second job, no second debit, for 24 hours. So a response lost in
+ * transit stays the retriable `EXECUTION_FAILED` it is, and the host's
+ * resend converges on the job the first attempt started. A resend that
+ * arrives while that first submit is still being processed answers 409
+ * `IDEMPOTENCY_KEY_IN_USE`, thrown as retriable too. Upstream scopes the
+ * key per workspace and endpoint, and the run id changes only when the run
+ * does.
  *
  * A FAILED READ IS NOT A FINISHED JOB. The job runs on, and bills, whatever
  * the poll answers, so a read that fails holds the run open and reads again
@@ -85,29 +91,25 @@ export default defineEndpoint({
     input: { schema: { body: zContactEmailBody } },
     timeouts: { requestMs: 35_000, runMs: 1_800_000, pollMs: 2_000 },
     lifecycle: {
-        start: async ({ utils }) => {
-            let res;
-            try {
-                res = await utils.request();
-            } catch (error) {
-                // Sent once (see the header): a lost response ends the run.
-                if (
-                    typeof error !== "object" || error === null ||
-                    (error as { code?: unknown }).code !== "EXECUTION_FAILED"
-                ) {
-                    throw error;
-                }
-                return {
-                    kind: "COMPLETED",
-                    httpStatus: 502,
-                    output: {
-                        error: "submit_unconfirmed",
-                        message: "The lookup's submit got no response, so " +
-                            "whether it started upstream is unknown. It " +
-                            "is not resent automatically: a second " +
-                            "submit would start and bill a second lookup.",
-                    },
-                };
+        start: async ({ data, utils }) => {
+            // One key per run (see the header): a resent submit gets the
+            // first one's acknowledgement back, never a second job.
+            const res = await utils.request({
+                headers: {
+                    ...data.request.headers,
+                    "Idempotency-Key": data.run.runId + ":submit",
+                },
+            });
+            // This run's earlier submit is still being processed: thrown,
+            // so retriable, and the host's resend reads its answer.
+            if (
+                res.status === 409 &&
+                utils.json.optionalGet(res.body, "$.error.code") ===
+                    "IDEMPOTENCY_KEY_IN_USE"
+            ) {
+                throw new Error(
+                    "Reverse Contact is still processing this run's submit",
+                );
             }
             if (res.status < 200 || res.status >= 300) {
                 return {

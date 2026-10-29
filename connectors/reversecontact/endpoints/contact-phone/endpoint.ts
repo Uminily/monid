@@ -8,7 +8,7 @@ import { zContactPhoneBody } from "./schema/inputs.ts";
  * debits 20 credits, the lifecycle long-polls
  * `GET /v2/webhooks/{webhookId}`,
  * and the poll's `data.creditsConsumed`, net of the refund a miss gets,
- * settles the run. The lifecycle (a submit sent once, failed reads held
+ * settles the run. The lifecycle (an idempotent submit, failed reads held
  * open, an unreadable job failed as a 502), evidence and consolidate fns
  * are byte-identical to the email finder's, so they intern to one fnTable
  * entry each.
@@ -51,29 +51,25 @@ export default defineEndpoint({
     input: { schema: { body: zContactPhoneBody } },
     timeouts: { requestMs: 35_000, runMs: 1_800_000, pollMs: 2_000 },
     lifecycle: {
-        start: async ({ utils }) => {
-            let res;
-            try {
-                res = await utils.request();
-            } catch (error) {
-                // Sent once (see the header): a lost response ends the run.
-                if (
-                    typeof error !== "object" || error === null ||
-                    (error as { code?: unknown }).code !== "EXECUTION_FAILED"
-                ) {
-                    throw error;
-                }
-                return {
-                    kind: "COMPLETED",
-                    httpStatus: 502,
-                    output: {
-                        error: "submit_unconfirmed",
-                        message: "The lookup's submit got no response, so " +
-                            "whether it started upstream is unknown. It " +
-                            "is not resent automatically: a second " +
-                            "submit would start and bill a second lookup.",
-                    },
-                };
+        start: async ({ data, utils }) => {
+            // One key per run (see the header): a resent submit gets the
+            // first one's acknowledgement back, never a second job.
+            const res = await utils.request({
+                headers: {
+                    ...data.request.headers,
+                    "Idempotency-Key": data.run.runId + ":submit",
+                },
+            });
+            // This run's earlier submit is still being processed: thrown,
+            // so retriable, and the host's resend reads its answer.
+            if (
+                res.status === 409 &&
+                utils.json.optionalGet(res.body, "$.error.code") ===
+                    "IDEMPOTENCY_KEY_IN_USE"
+            ) {
+                throw new Error(
+                    "Reverse Contact is still processing this run's submit",
+                );
             }
             if (res.status < 200 || res.status >= 300) {
                 return {

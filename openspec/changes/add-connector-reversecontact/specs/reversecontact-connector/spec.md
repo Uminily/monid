@@ -68,8 +68,10 @@ or `errored`. A read that fails SHALL hold the run open and read again
 after 5 s: a transport failure, 401, 403, 408, 429 or any 5xx. Any other
 non-2xx poll (404, 410: the job cannot be read) SHALL fail the run as a 502
 carrying the poll's status as `providerHttpStatus`, never as a 404. The
-submit SHALL be sent once: a submit lost in transit SHALL end the run as a
-502 `submit_unconfirmed`, never resent. A 2xx acknowledgement without a
+submit SHALL carry `Idempotency-Key: {runId}:submit`, the same on every
+start of one run, so a resend is the same request upstream. A submit lost
+in transit SHALL fail the start as a retriable `EXECUTION_FAILED`, and so
+SHALL a 409 `IDEMPOTENCY_KEY_IN_USE`. A 2xx acknowledgement without a
 `webhookId` SHALL be a non-retriable infrastructure failure. Both finders
 SHALL carry a 30-minute `runMs`. The two lifecycles SHALL be byte-identical.
 
@@ -102,10 +104,17 @@ SHALL carry a 30-minute `runMs`. The two lifecycles SHALL be byte-identical.
 - **THEN** the run settles 502 with `providerHttpStatus` 404 or 410, zero
   usage, and the upstream `code`
 
-#### Scenario: A lost submit is never resent
-- **WHEN** the submit's response is lost in transit
-- **THEN** the run settles 502 `submit_unconfirmed` after one POST, zero
-  usage
+#### Scenario: A resent submit converges on the first job
+- **WHEN** the submit's response is lost in transit and the host resends
+  the start under the same run
+- **THEN** the first start fails retriable `EXECUTION_FAILED`, both
+  submits carry `Idempotency-Key: {runId}:submit`, and the resend's
+  replayed acknowledgement parks the run on the first job's `webhookId`
+
+#### Scenario: A resend while the first submit is still processed
+- **WHEN** the resend answers 409 `IDEMPOTENCY_KEY_IN_USE`
+- **THEN** the start fails retriable `EXECUTION_FAILED`, never a settled
+  run
 
 #### Scenario: A refunded miss is a 404
 - **WHEN** a job ends `errored` with `email-not-found`

@@ -86,9 +86,18 @@
 - [x] 8.2 `runMs` 30 minutes on both finders
 - [x] 8.3 The submit is sent once: a submit lost in transit ends the run as
       a 502 `submit_unconfirmed` instead of a retriable `EXECUTION_FAILED`
+      (superseded by 9.2)
 - [x] 8.4 The fetches and the availability checks compose one identifier
       fragment (`schema/profile-ref.ts`) instead of re-exporting a sibling
       endpoint's schema; the compiled input schemas are unchanged
 - [x] 8.5 Regression tests for 8.1 to 8.3, failing on the previous
       lifecycle
 
+## 9. Upstream idempotency (2026-10-29)
+
+- [x] 9.1 Both finders' submit carries `Idempotency-Key: {runId}:submit`,
+      the same on every start of one run; upstream replays the first
+      acknowledgement for 24 hours, without a second job or debit
+- [x] 9.2 A submit lost in transit is a retriable `EXECUTION_FAILED` again,
+      and a 409 `IDEMPOTENCY_KEY_IN_USE` is thrown retriable
+- [x] 9.3 Regression tests for 9.1 and 9.2, failing on the 8.3 lifecycle
