@@ -43,3 +43,12 @@ Deno.test(`${ID} phone finding off: the bare 410 body reads as a coded error, ze
         true,
     );
 });
+
+Deno.test(`${ID} budget: the email finder's 30 minutes, read every 2 s`, async () => {
+    const unit = await testSealedUnit(ID);
+    assertEquals(unit.doc.timeouts, {
+        requestMs: 35_000,
+        runMs: 1_800_000,
+        pollMs: 2_000,
+    });
+});

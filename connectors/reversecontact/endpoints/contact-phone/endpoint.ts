@@ -8,13 +8,15 @@ import { zContactPhoneBody } from "./schema/inputs.ts";
  * debits 20 credits, the lifecycle long-polls
  * `GET /v2/webhooks/{webhookId}`,
  * and the poll's `data.creditsConsumed`, net of the refund a miss gets,
- * settles the run. The lifecycle, evidence and consolidate fns are
- * byte-identical to the email finder's, so they intern to one fnTable
+ * settles the run. The lifecycle (a submit sent once, failed reads held
+ * open, an unreadable job failed as a 502), evidence and consolidate fns
+ * are byte-identical to the email finder's, so they intern to one fnTable
  * entry each.
  *
  * BUDGET. Over 119 production jobs (30 days to 2026-10-21), completion
- * took 14 s at the median and 30 s at most; the email finder's 10-minute
- * `runMs` is kept.
+ * took 14 s at the median and 30 s at most; the email finder's 30-minute
+ * `runMs` is kept, for the same reason: a poll outage must not abandon a
+ * job that bills upstream.
  *
  * A workspace with phone finding turned off answers the submit with 410
  * and a bare body (`{error: "endpoint_unavailable", message,
@@ -47,10 +49,32 @@ export default defineEndpoint({
     },
     request: { method: "POST", path: "/v2/contact/phone" },
     input: { schema: { body: zContactPhoneBody } },
-    timeouts: { requestMs: 35_000, runMs: 600_000, pollMs: 2_000 },
+    timeouts: { requestMs: 35_000, runMs: 1_800_000, pollMs: 2_000 },
     lifecycle: {
         start: async ({ utils }) => {
-            const res = await utils.request();
+            let res;
+            try {
+                res = await utils.request();
+            } catch (error) {
+                // Sent once (see the header): a lost response ends the run.
+                if (
+                    typeof error !== "object" || error === null ||
+                    (error as { code?: unknown }).code !== "EXECUTION_FAILED"
+                ) {
+                    throw error;
+                }
+                return {
+                    kind: "COMPLETED",
+                    httpStatus: 502,
+                    output: {
+                        error: "submit_unconfirmed",
+                        message: "The lookup's submit got no response, so " +
+                            "whether it started upstream is unknown. It " +
+                            "is not resent automatically: a second " +
+                            "submit would start and bill a second lookup.",
+                    },
+                };
+            }
             if (res.status < 200 || res.status >= 300) {
                 return {
                     kind: "COMPLETED",
@@ -80,19 +104,35 @@ export default defineEndpoint({
             }
             // Long poll: upstream holds the read up to 20 s while the job
             // runs and answers as soon as it ends.
-            const res = await utils.http({
-                method: "GET",
-                path: "/v2/webhooks/" + encodeURIComponent(webhookId),
-                queryParams: { wait: "20" },
-            });
-            // A lookup that failed, not a job that ended: read again, later.
-            if (res.status === 408 || res.status === 429 || res.status >= 500) {
+            let res;
+            try {
+                res = await utils.http({
+                    method: "GET",
+                    path: "/v2/webhooks/" + encodeURIComponent(webhookId),
+                    queryParams: { wait: "20" },
+                });
+            } catch (error) {
+                if (
+                    typeof error !== "object" || error === null ||
+                    (error as { code?: unknown }).code !== "EXECUTION_FAILED"
+                ) {
+                    throw error;
+                }
                 return { kind: "RUNNING", pollAfterMs: 5_000 };
             }
+            // A read that failed, not a job that ended: read again, later.
+            if (
+                res.status === 401 || res.status === 403 ||
+                res.status === 408 || res.status === 429 || res.status >= 500
+            ) {
+                return { kind: "RUNNING", pollAfterMs: 5_000 };
+            }
+            // A job that cannot be read (404, 410): a failure, not a miss.
             if (res.status < 200 || res.status >= 300) {
                 return {
                     kind: "COMPLETED",
-                    httpStatus: res.status,
+                    httpStatus: 502,
+                    providerHttpStatus: res.status,
                     output: res.body,
                 };
             }

@@ -61,15 +61,22 @@ nothing is inferred from the payload.
   is a 200 with `data.exists: false`.
 - **Budgets are measured.** Over 38,398 production email jobs (30 days to
   2026-10-21) completion took 16 s at the median, 160 s at p99 and 321 s at
-  most; phone jobs never exceeded 30 s. Both finders carry a 10-minute
-  `runMs` and a 2-second poll cadence, the `Retry-After` upstream sends
-  while a job runs.
+  most; phone jobs never exceeded 30 s. Both finders carry a 30-minute
+  `runMs` (the budget of Monid's other asynchronous providers, room for a
+  poll outage on top of the slowest job) and a 2-second poll cadence, the
+  `Retry-After` upstream sends while a job runs.
+- **A finder run never abandons a live job, and never bills it twice.**
+  The job bills upstream at submit and runs on whatever the poll answers,
+  so a failed read (transport, 401, 403, 408, 429, 5xx) holds the run
+  open, and a job that cannot be read (404, 410) fails the run as a 502,
+  not as a free miss. The submit carries no idempotency key upstream, so a
+  submit lost in transit ends the run as a 502 instead of being resent.
 - **Estimates are ceilings.** 1 per fetch, 2 per enrichment, `perPage` per
   search page (the vendor's documented default of 25 is stated at the
   binding), `perPage + 1` per prompt search, 3, 5 or 8 per email lookup
   by `emailType` (`professional`, `personal`, `any`: the most it can
   cost), 20 per phone lookup.
-- 28 synthetic fixture chains and 22 replay tests, plus one live test gated
+- 31 synthetic fixture chains and 28 replay tests, plus one live test gated
   on `REVERSECONTACT_API_KEY` that runs a free count.
 - **Revised 2026-10-27** to the vendor's current contract: `emailType` on
   the email finder (vendor changelog v2.36.0), the long poll (v2.38.0),

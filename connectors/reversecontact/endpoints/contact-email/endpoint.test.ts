@@ -1,7 +1,13 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { fromFileUrl } from "@std/path";
+import { directTransport, Engine } from "@monid/connector-engine";
 import type { Json } from "@shared/core";
-import { loadFixture, runEndpoint, testSealedUnit } from "@shared/testing";
+import {
+    loadFixture,
+    replayFetch,
+    runEndpoint,
+    testSealedUnit,
+} from "@shared/testing";
 
 const FIXTURES = fromFileUrl(new URL("../../fixtures/", import.meta.url));
 const chain = (name: string) => loadFixture(`${FIXTURES}${name}.json`);
@@ -18,6 +24,32 @@ const run = async (fixture: string, body: Record<string, Json> = URL_BODY) =>
         mode: "replay",
         fixture: await chain(fixture),
     });
+
+/** Replays a chain through a network that drops the calls numbered in
+ *  `dropped` (0-based) before they reach the chain, as a connection reset
+ *  would. Returns the run and every call the engine sent. */
+const runOverFlakyNetwork = async (fixture: string, dropped: number[]) => {
+    const unit = await testSealedUnit(ID);
+    const requestUrl = unit.doc.request.url;
+    const replay = replayFetch(await chain(fixture), {
+        "request.url": requestUrl,
+        "request.origin": new URL(requestUrl).origin,
+    });
+    const sent: string[] = [];
+    const loaded = await new Engine({
+        transport: directTransport({
+            params: () => Promise.resolve({ apiKey: "test-key" }),
+            fetch: (input, init) => {
+                sent.push(init?.method ?? "GET");
+                return dropped.includes(sent.length - 1)
+                    ? Promise.reject(new TypeError("connection reset"))
+                    : replay(input, init);
+            },
+        }),
+        sleep: () => Promise.resolve(),
+    }).load(unit);
+    return { result: await loaded.run({ body: URL_BODY }), sent };
+};
 
 Deno.test(`${ID} found: the run waits for the job and settles on the job's own receipt, not the poll's quotas`, async () => {
     const result = await run("synthetic-contact-email-found");
@@ -117,11 +149,75 @@ Deno.test(`${ID} refused at submit (402): settles at once, zero usage, no poll`,
     assertEquals(asRecord(result.output).code, "INSUFFICIENT_CREDITS");
 });
 
-Deno.test(`${ID} budget: 10 minutes, past the slowest production job (321 s), read every 2 s as upstream's Retry-After asks`, async () => {
+Deno.test(`${ID} a 401 then a 403 on the poll hold the run open: the job runs on upstream, the third read settles it`, async () => {
+    const result = await run("synthetic-contact-poll-auth-transient");
+    assertEquals(result.httpStatus, 200);
+    assertEquals(result.usage, {
+        credits: { default: 3 },
+        evidence: { CREDIT: 3 },
+    });
+});
+
+Deno.test(`${ID} a 404 on the poll (the job cannot be read) fails the run as a 502, never a free miss`, async () => {
+    const result = await run("synthetic-contact-poll-gone");
+    assertEquals(result.httpStatus, 502);
+    assertEquals(result.providerHttpStatus, 404);
+    assertEquals(result.isProviderError, true);
+    assertEquals(result.usage, { credits: {}, evidence: {} });
+    const output = asRecord(result.output);
+    assertEquals(output.code, "WEBHOOK_EVENT_NOT_FOUND");
+    assertEquals(
+        output.message,
+        "Webhook event not found: 6f1c2a9e-3b7d-4c55-9a8e-1d2f3a4b5c6d",
+    );
+    assertEquals("quotas" in asRecord(output.raw), false);
+});
+
+Deno.test(`${ID} a 410 on the poll (the job is past retention) fails the run as a 502 too`, async () => {
+    const result = await run("synthetic-contact-poll-expired");
+    assertEquals(result.httpStatus, 502);
+    assertEquals(result.providerHttpStatus, 410);
+    assertEquals(result.usage, { credits: {}, evidence: {} });
+    assertEquals(asRecord(result.output).code, "WEBHOOK_EVENT_EXPIRED");
+});
+
+Deno.test(`${ID} a poll lost in transit holds the run open: the next read goes on`, async () => {
+    const { result, sent } = await runOverFlakyNetwork(
+        "synthetic-contact-email-found",
+        [1],
+    );
+    assertEquals(sent, ["POST", "GET", "GET", "GET"]);
+    assertEquals(result.httpStatus, 200);
+    assertEquals(result.usage, {
+        credits: { default: 3 },
+        evidence: { CREDIT: 3 },
+    });
+});
+
+Deno.test(`${ID} a submit lost in transit is never resent: the run ends a 502, zero usage, after one POST`, async () => {
+    const { result, sent } = await runOverFlakyNetwork(
+        "synthetic-contact-email-found",
+        [0],
+    );
+    assertEquals(sent, ["POST"]);
+    assertEquals(result.httpStatus, 502);
+    assertEquals(result.isProviderError, true);
+    assertEquals(result.usage, { credits: {}, evidence: {} });
+    const output = asRecord(result.output);
+    assertEquals(output.code, "submit_unconfirmed");
+    assertEquals(
+        (output.message as string).startsWith(
+            "The lookup's submit got no response",
+        ),
+        true,
+    );
+});
+
+Deno.test(`${ID} budget: 30 minutes, room past the slowest production job (321 s) for a poll outage, read every 2 s as upstream's Retry-After asks`, async () => {
     const unit = await testSealedUnit(ID);
     assertEquals(unit.doc.timeouts, {
         requestMs: 35_000,
-        runMs: 600_000,
+        runMs: 1_800_000,
         pollMs: 2_000,
     });
 });

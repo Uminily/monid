@@ -64,10 +64,14 @@ success output, and `output.fromError` SHALL remove it from `raw`.
 SHALL each carry a lifecycle whose `start` submits the body and keeps
 `data.webhookId` as `externalRunId`, and whose `poll` long-polls
 `GET /v2/webhooks/{webhookId}?wait=20` until `data.status` is `succeeded`
-or `errored`. A poll answering 408, 429 or any 5xx SHALL hold the run open
-and read again after 5 s. A
-2xx acknowledgement without a `webhookId` SHALL be a non-retriable
-infrastructure failure. The two lifecycles SHALL be byte-identical.
+or `errored`. A read that fails SHALL hold the run open and read again
+after 5 s: a transport failure, 401, 403, 408, 429 or any 5xx. Any other
+non-2xx poll (404, 410: the job cannot be read) SHALL fail the run as a 502
+carrying the poll's status as `providerHttpStatus`, never as a 404. The
+submit SHALL be sent once: a submit lost in transit SHALL end the run as a
+502 `submit_unconfirmed`, never resent. A 2xx acknowledgement without a
+`webhookId` SHALL be a non-retriable infrastructure failure. Both finders
+SHALL carry a 30-minute `runMs`. The two lifecycles SHALL be byte-identical.
 
 #### Scenario: The job's receipt is the bill
 - **WHEN** an email job succeeds and its final poll reports
@@ -86,6 +90,22 @@ infrastructure failure. The two lifecycles SHALL be byte-identical.
 - **WHEN** an email job succeeds and its final poll carries no
   `data.creditsConsumed`
 - **THEN** the run fails `FN_CONTRACT` and settles nothing at zero
+
+#### Scenario: A failed read holds the run open
+- **WHEN** a poll answers 401, then 403, or is lost in transit, while the
+  job runs upstream
+- **THEN** the run reads again 5 s later and settles on the finished job
+
+#### Scenario: A job that cannot be read is a failure, not a miss
+- **WHEN** a poll answers 404 `WEBHOOK_EVENT_NOT_FOUND` or 410
+  `WEBHOOK_EVENT_EXPIRED`
+- **THEN** the run settles 502 with `providerHttpStatus` 404 or 410, zero
+  usage, and the upstream `code`
+
+#### Scenario: A lost submit is never resent
+- **WHEN** the submit's response is lost in transit
+- **THEN** the run settles 502 `submit_unconfirmed` after one POST, zero
+  usage
 
 #### Scenario: A refunded miss is a 404
 - **WHEN** a job ends `errored` with `email-not-found`
