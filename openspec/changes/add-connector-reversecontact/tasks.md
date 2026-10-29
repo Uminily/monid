@@ -72,9 +72,9 @@
 
 - [x] 7.1 `#v2/fetch/persons/check` and `#v2/fetch/companies/check`: free,
       the fetches' body, a miss answering 200 `exists: false`
-- [x] 7.2 Every evidence fn reads its receipt with `utils.json.num`
-      (provider, email and phone finders): a 2xx without one fails
-      `FN_CONTRACT`
+- [x] 7.2 Every billed evidence read uses `utils.json.num` (provider,
+      email and phone finders): a billed 2xx without its receipt fails
+      `FN_CONTRACT`; free endpoints skip the read
 - [x] 7.3 Regression tests for both, failing on the previous
       `optionalNum` reads
 

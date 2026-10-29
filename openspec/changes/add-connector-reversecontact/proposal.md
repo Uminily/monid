@@ -45,9 +45,13 @@ nothing is inferred from the payload.
   the emails found, not `emailType` (3 credits for a professional email, 5
   for a personal one, so an `any` lookup costs 3, 5 or 8, the 8 only when
   it finds both), and upstream settles the upfront debit when the result
-  arrives. The submit's receipt never shows that settlement. Every
-  evidence fn reads its receipt with `utils.json.num`: a 2xx without it
-  fails `FN_CONTRACT` instead of settling delivered data at zero.
+  arrives. The submit's receipt never shows that settlement. On a billed
+  response the evidence fn reads its receipt with `utils.json.num`: a
+  billed 2xx without it fails `FN_CONTRACT` instead of settling delivered
+  data at zero. Free endpoints skip that read (their evidence counts
+  nothing), and `consolidate` reads the same receipt leniently
+  (`optionalNum` at provider level, a type check in the finders), only to
+  lift it out as the claim: failing closed is the evidence's job.
 - **The account's quotas never reach the caller.** Beside the receipt,
   `quotas` carries the broker account's balance, limits and ids. It is
   plucked on success and removed from `raw` on error.
@@ -88,8 +92,8 @@ nothing is inferred from the payload.
   refuses with 422 `UNKNOWN_FIELD`.
 - **Revised 2026-10-28** after the maintainer's review: the two free
   availability checks (`/v2/fetch/persons/check`,
-  `/v2/fetch/companies/check`) added, and every receipt read with
-  `utils.json.num`, so a 2xx without one fails closed.
+  `/v2/fetch/companies/check`) added, and every billed evidence read made
+  with `utils.json.num`, so a billed 2xx without its receipt fails closed.
 
 ## Capabilities
 

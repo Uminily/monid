@@ -22,10 +22,11 @@ replace the declarative execution of the thirteen synchronous endpoints.
 Every billed synchronous endpoint SHALL price a leaf `PER_UNIT` in `CREDIT`
 units at amount 1, and the provider SHALL declare `usage.evidence` reading
 `quotas.creditsConsumed` as that count and `usage.consolidate` claiming the
-same figure when it is positive. The evidence SHALL read the receipt with
-`utils.json.num`, so a success without one fails `FN_CONTRACT`. Free
-endpoints (the two counts and the two availability checks) SHALL declare a
-`FREE` model.
+same figure when it is positive. On a billed endpoint the evidence SHALL
+read the receipt with `utils.json.num`, so a billed success without one
+fails `FN_CONTRACT`. Free endpoints (the two counts and the two
+availability checks) SHALL declare a `FREE` model, and their evidence
+counts nothing without reading the receipt.
 
 #### Scenario: A prompt search bills its base credit
 - **WHEN** a People Search by prompt returns two profiles with a receipt
